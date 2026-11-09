@@ -73,8 +73,6 @@ set(DEFINITIONS_DIR "../VirconDefinitions/"
     CACHE PATH "The path to desktop Vircon definitions sources.")
 set(DATA_DIR "Data/"
     CACHE PATH "The path to folder containing data files.")
-set(RUNTIME_DIR "Runtime/"
-    CACHE PATH "The path to the runtime files (DLLs).")
 
 # Configure find_* commands to never try to find Mac frameworks, only packages
 set(CMAKE_FIND_FRAMEWORK CACHE STRING "NEVER")
