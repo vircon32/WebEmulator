@@ -14,15 +14,18 @@
     #define SDL_MAIN_HANDLED
     #include "SDL.h"            // [ SDL2 ] Main header
     
-    // include OpenGL headers
-    #include <glad/glad.h>      // [ OpenGL ] GLAD Loader (already includes <GL/gl.h>)
+    // include OpenGL headers; on desktop we would need a
+    // loader such as glad, but since Emscripten provides
+    // the symbols directly it is not needed here
+    #include <GLES2/gl2.h>      // [ OpenGL ] GLES2 headers, compatible with WebGL1
 // *****************************************************************************
 
 
-// we will render our quads in groups using a
-// fixed size queue; this parameter sets the
-// queue size and acts as group size limit
-#define QUAD_QUEUE_SIZE 20
+// we will render our quads in groups using a fixed size queue;
+// this parameter sets the queue size and acts as group size limit;
+// on WebGL/JS the cost per call is quite higher so compensate by
+// allowing longer drawing queues
+#define QUAD_QUEUE_SIZE 512
 
 
 // =============================================================================
@@ -66,7 +69,6 @@ class VideoOutput
         unsigned FramebufferHeight;
         
         // additional GL objects
-        GLuint VAO;
         GLuint VBOVertexInfo;
         GLuint VBOIndices;
         GLuint ShaderProgramID;

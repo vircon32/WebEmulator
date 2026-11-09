@@ -183,18 +183,12 @@ void VideoOutput::CreateOpenGLWindow()
     // load default dynamic OpenGL libraries
     SDL_GL_LoadLibrary( nullptr );
     
-    // choose what OpenGL version to request (system dependent)
-    #ifdef __arm__
-      // on Raspberry/ARM systems request OpenGL ES 2.0 for FBO support
-      SDL_GL_SetAttribute( SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES );
-      SDL_GL_SetAttribute( SDL_GL_CONTEXT_MAJOR_VERSION, 2 );
-      SDL_GL_SetAttribute( SDL_GL_CONTEXT_MINOR_VERSION, 0 );
-    #else
-      // for other systems use the regular OpenGL Core 3.0
-      SDL_GL_SetAttribute( SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE );
-      SDL_GL_SetAttribute( SDL_GL_CONTEXT_MAJOR_VERSION, 3 );
-      SDL_GL_SetAttribute( SDL_GL_CONTEXT_MINOR_VERSION, 0 );
-    #endif
+    // choose what OpenGL version to request; this is system
+    // dependent but on this version we only use emscripten
+    // so we will always request OpenGL ES 2.0 for FBO support
+    SDL_GL_SetAttribute( SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES );
+    SDL_GL_SetAttribute( SDL_GL_CONTEXT_MAJOR_VERSION, 2 );
+    SDL_GL_SetAttribute( SDL_GL_CONTEXT_MINOR_VERSION, 0 );
     
     // request double buffering
     SDL_GL_SetAttribute( SDL_GL_DOUBLEBUFFER, 1 );
@@ -232,14 +226,6 @@ void VideoOutput::CreateOpenGLWindow()
     
     SDL_GL_MakeCurrent( Window, OpenGLContext );
     
-    // GLAD loader has to be called after OpenGL is initialized (i.e. window is created)
-    // but, before we make any calls related to framebuffer objects
-    // (alternatively, use gladLoadGL() instead)
-    LOG( "Initializing GLAD" );
-    
-    if( !gladLoadGLLoader( (GLADloadproc)SDL_GL_GetProcAddress ) )
-      THROW( "There was an error initializing GLAD" );
-    
     // log the version name for the received OpenGL context
     string OpenGLVersionName = (const char *)glGetString(GL_VERSION);
     LOG( "Started OpenGL version " + OpenGLVersionName );
@@ -249,13 +235,8 @@ void VideoOutput::CreateOpenGLWindow()
     int MajorVersion = 1;
     SDL_GL_GetAttribute( SDL_GL_CONTEXT_MAJOR_VERSION, &MajorVersion );
     
-    #ifdef __arm__
     if( glGetError() != GL_NO_ERROR || MajorVersion < 2 )
       THROW( "This computer does not support the minimum required OpenGL version (OpenGL ES 2.0)" );
-    #else
-    if( glGetError() != GL_NO_ERROR || MajorVersion < 3 )
-      THROW( "This computer does not support the minimum required OpenGL version (OpenGL 3.0)" );
-    #endif
     
     // show basic OpenGL information
     LOG( string("OpenGL renderer: ") + (char*)glGetString( GL_RENDERER ) );
@@ -313,7 +294,7 @@ void VideoOutput::CreateFramebuffer()
     (
         GL_TEXTURE_2D,
         0,
-        GL_RGB8,
+        GL_RGB,  // GL ES 2 requires format and internal format to match
         FramebufferWidth,
         FramebufferHeight,
         0,
@@ -347,11 +328,8 @@ void VideoOutput::CreateFramebuffer()
     
     LOG( "Framebuffer status OK" );
     
-    // Set the list of draw buffers.
-    GLenum ColorBuffers[ 1 ] = { GL_COLOR_ATTACHMENT0 };
-    glDrawBuffers( 1, ColorBuffers );
-    LogOpenGLResult( "glDrawBuffers" );
-    
+    // on GL ES2 we don't need to attach a color buffer to the
+    // framebuffer: it already has an implicit attachment
     LOG( "Finished creating Framebuffer" );
 }
 
@@ -477,14 +455,8 @@ void VideoOutput::InitRendering()
     TextureUnitLocation = glGetUniformLocation( ShaderProgramID, "TextureUnit" );
     MultiplyColorLocation = glGetUniformLocation( ShaderProgramID, "MultiplyColor" );
     
-    // on a core OpenGL profile, we need this since
-    // the default VAO is not valid!
-    glGenVertexArrays( 1, &VAO );
-    glBindVertexArray( VAO );
-    
-    // we will also need this for a core OpenGL
-    // profile. For an OpenGL ES profile, instead,
-    // it is enough to just use VAO without VBO
+    // GL ES contexts always have default a VAO,
+    // so we can use VBO without worrying about it
     glGenBuffers( 1, &VBOVertexInfo );
     glGenBuffers( 1, &VBOIndices );
     
@@ -690,21 +662,39 @@ void VideoOutput::RenderToFramebuffer()
 
 void VideoOutput::DrawFramebufferOnScreen()
 {
-    // 2 framebuffers can be bound for reading and
-    // writing separately; we can use this to copy
-    glBindFramebuffer( GL_READ_FRAMEBUFFER, FramebufferID );
-    glBindFramebuffer( GL_DRAW_FRAMEBUFFER, 0 );
+    // ensure that any pending quads are drawn
+    RenderQuadQueue();  
     
-    // now perform the copy
-    glBlitFramebuffer
-    (
-        0, 0,                                               // source top-left
-        Constants::ScreenWidth, Constants::ScreenHeight,    // source bottom-right
-        0, 0,                                               // destination top-left
-        (int)WindowWidth, (int)WindowHeight,                // destination bottom-right
-        GL_COLOR_BUFFER_BIT,                                // which bitfield to copy
-        GL_NEAREST                                          // interpolation mode
-    );
+    // this drawing operation will go through the fragment shader
+    // like everything else, so we need to disable the multiply
+    // color to avoid tinting the scren; BeginFrame() will restore
+    // the console's current multiply color after this
+    glUniform4f( MultiplyColorLocation, 1.0, 1.0, 1.0, 1.0 );
+    
+    
+    // Y axis is flipped between the top and bottom vertex rows: this same
+    // vertex shader is also used to render the console's own content into
+    // this framebuffer, where y=0 is at the top of the screen
+    float WidthFactor  = (float)Constants::ScreenWidth  / FramebufferWidth;
+    float HeightFactor = (float)Constants::ScreenHeight / FramebufferHeight;
+    
+    float Vertices[ 16 ] =
+    {
+                             0,                       0,           0, HeightFactor,
+        Constants::ScreenWidth,                       0, WidthFactor, HeightFactor,
+                             0,   nstants::ScreenHeight,           0,            0,
+        Constants::ScreenWidth, Constants::ScreenHeight, WidthFactor,            0
+    };
+    
+    // glBlitFramebuffer doesn't exist in ES2/WebGL1. Draw the
+    // framebuffer's color texture as a single textured quad through the
+    // same shader used for everything else instead - this texture
+    // already has GL_NEAREST filtering set (see CreateFramebuffer()),
+    // so the visual result is identical to the blit it replaces.
+    glBindTexture( GL_TEXTURE_2D, FBColorTextureID );
+    glBindBuffer( GL_ARRAY_BUFFER, VBOVertexInfo );
+    glBufferSubData( GL_ARRAY_BUFFER, 0, sizeof( Vertices ), Vertices );
+    glDrawElements( GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, (void*)0 );
 }
 
 // -----------------------------------------------------------------------------

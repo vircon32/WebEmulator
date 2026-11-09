@@ -37,6 +37,12 @@ set(EMULATOR_BINARY_NAME "Vircon32Web")
 #   IDENTIFY HOST ENVIRONMENT
 # -----------------------------------------------------
 
+# Only emscripten allowed for the web version; for
+# other targets use the desktop emulator instead
+if(NOT EMSCRIPTEN)
+    message(FATAL_ERROR "This is a web C++ project and it must be build using Emscripten")
+endif()
+
 # Detect architecture bits
 if(CMAKE_SIZEOF_VOID_P EQUAL 8)
     set(TARGET_BITS "64")
