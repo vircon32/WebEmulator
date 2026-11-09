@@ -59,10 +59,6 @@ endif()
 # -----------------------------------------------------
 
 # These general project variables should be cached
-set(LIBRARIES_DIR "ExternalLibraries/"
-    CACHE PATH "The path to the external libraries.")
-set(PROGRAMS_DIR "ExternalPrograms/"
-    CACHE PATH "The path to the external programs.")
 set(EMULATOR_DIR "Emulator/"
     CACHE PATH "The path to the emulator sources.")
 set(CONSOLELOGIC_DIR "ConsoleLogic/"
@@ -182,9 +178,6 @@ include_directories(.)
 # -----------------------------------------------------
 #   LINKED LIBRARIES FILES
 # -----------------------------------------------------
-
-# Add external libraries
-add_subdirectory(${LIBRARIES_DIR})
 
 # Add project's own libraries
 add_subdirectory(${CONSOLELOGIC_DIR})
