@@ -251,6 +251,15 @@ bool AudioOutput::QueueNextBuffer()
     // console sound output is ignored when muted
     if( Mute ) return true;
     
+    // regulate how far the queue is allowed to grow ahead of real-time
+    // playback; if we only use SDL_QueueAudio, ot will push more audio
+    // on every single call and this can get more expensive over time
+    Uint32 QueuedBytes = SDL_GetQueuedAudioSize( AudioDeviceID );
+    Uint32 MaxQueuedBytes = (Uint32)MAX_LATENCY_FRAMES * (Uint32)sizeof( PlaybackBuffer.Samples );
+    
+    if( QueuedBytes > MaxQueuedBytes )
+      return true;
+    
     // obtain sound output for the current frame
     Console.GetFrameSoundOutput( PlaybackBuffer );
     
